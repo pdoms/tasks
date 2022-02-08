@@ -2,9 +2,11 @@ import csv
 import os
 import re    
 import numpy as np
-from gensim.parsing.preprocessing import remove_stopwords, strip_punctuation
+import copy
+from gensim.parsing.preprocessing import remove_stopwords, strip_punctuation, STOPWORDS
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from num2words import num2words
+
 
 def is_number_regex(s):
     if re.match("^\d+?\.\d+", s) is None:
@@ -18,11 +20,12 @@ class Tokens():
         self.vocab = {}
         self._index = 0
         self.sparse = []
-        self._tokens = []
+        self.tokenized = []
         self.count_vector = []
-        self.token_list = []
+        self.count_vector_normalized = []
+        
         self.stopwords =[]
-        self.preprocess_opts = ['lower', 'num2word', 'stopwords', 'punctuation', 'lemmatization', 'stem', 'symbols']
+        self.preprocess_opts = ['lower', 'num2word', 'punctuation', 'stopwords', 'lemmatization', 'stem', 'symbols']
 
     def __call__(self, data, encoding='utf-8', column=None, preprocess=[], symbols=[]):
         if isinstance(data, list):
@@ -34,8 +37,17 @@ class Tokens():
         else: 
             raise ValueError('Pass either a List or a path to a csv or txt file.')
         self._preprocess(preprocess, symbols)
+        self._tokenize()
         self._create_vocab()
         self._vectorize_sparse()
+        self._normalize_count_vector()
+        
+        
+    
+    def _tokenize(self):
+        for sentence in self._data:
+            self.tokenized.append(sentence.split(' '))
+        
 
     def get_tokens(self):
         return np.array(self._tokens)
@@ -52,18 +64,11 @@ class Tokens():
             self._data = np.array([row for row in file.readlines()])
             
     def _create_vocab(self):
-        for sentence in self._data:
-            tkns = sentence.split(' ')
-            for t in tkns:
-                if t not in self._tokens:
-                    self._tokens.append(t)
-            listed = []
-            for word in tkns:
-                if word not in self.vocab and word != '':
-                    listed.append(word)
+        for sentence in self.tokenized:
+            for word in sentence:
+                if word not in self.vocab:
                     self.vocab[word] = self._index
                     self._index += 1
-            self.token_list.append(listed)
 
     def expand_vocab(self, data, encoding='utf-8', column=None):
         pass
@@ -78,7 +83,7 @@ class Tokens():
                 if opt == 'num2word':
                     sentence = self._num_to_words(sentence)
                 if opt == 'stopwords':
-                    sentence = self._remove_stopwords(sentence)
+                    sentence = self._remove_stopwords(sentence)          
                 if opt == 'punctuation':
                     sentence = self._remove_punctuation(sentence)
                 if opt == 'lemmatization':
@@ -90,7 +95,7 @@ class Tokens():
                         print('Preprocessing: removing custom symbols was requested, but no symbols were provided... skipping the step.')
                     else:
                         sentence = self._custom_symbols(sentence)
-            self._data[i] = sentence
+                self._data[i] = sentence
         return self._data
 
 
@@ -139,10 +144,20 @@ class Tokens():
     def _vectorize_sparse(self):
         n = len(self._data)
         self.count_vector = np.zeros((n, len(self.vocab)))
-        for i, sentence in enumerate(self.token_list):
+        for i, sentence in enumerate(self.tokenized):
             for word in sentence:
                     self.count_vector[i][self.vocab[word]] += 1
     
+    def _normalize_count_vector(self):
+        self.count_vector_normalized = copy.copy(self.count_vector)
+        for i, sentence in enumerate(self.count_vector_normalized):
+            length = len(self.tokenized[i])
+            for j, count in enumerate(sentence):
+                if count > 0:
+                    self.count_vector_normalized[i][j] = count/length
+
+                
+            
     
 
 p = os.getcwd()
@@ -150,6 +165,10 @@ p = p.replace('src', '')
 p = os.path.join(p, 'data', 'Mini_Tweets', 'negative.csv')
 t = Tokens()
 t(p, column=5)
+
+
+
+
 
 
 
