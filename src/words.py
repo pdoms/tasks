@@ -3,10 +3,19 @@ import os
 import re    
 import numpy as np
 import copy
+import math
 from gensim.parsing.preprocessing import remove_stopwords, strip_punctuation, STOPWORDS
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from num2words import num2words
+from distances import cosine_distance
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer, TfidfTransformer
 
+#TODO 
+#check more of stemming and lemmatization (not happy)
+#finish query
+#csr 
+#support vector classifier
+#word embeddings
 
 def is_number_regex(s):
     if re.match("^\d+?\.\d+", s) is None:
@@ -14,102 +23,182 @@ def is_number_regex(s):
     return True
 
 
-class Tokens():
+class Words():
     def __init__(self):
-        self._data = []
+        self.data = []
+        self.n = 0
         self.vocab = {}
-        self._index = 0
-        self.sparse = []
+        self.index = 0
         self.tokenized = []
         self.count_vector = []
-        self.count_vector_normalized = []
-        
-        self.stopwords =[]
-        self.preprocess_opts = ['lower', 'num2word', 'punctuation', 'stopwords', 'lemmatization', 'stem', 'symbols']
+        self.df = []
+        self.idf = []
+        self.tf_idf = []
+        self.preprocess_opts = ['whitespace', 'lower', 'num2word', 'lemmatization', 'stem', 'punctuation', 'stopwords', 'single_character', 'symbols']
+        self.last_preproc_opts = ()
+        self.is_query = False
+
 
     def __call__(self, data, encoding='utf-8', column=None, preprocess=[], symbols=[]):
         if isinstance(data, list):
-            self._data = data
+            self.data = data
         elif data.endswith('csv'):
-            self._from_cvs(data, column)
+            self.from_cvs(data, column)
         elif data.endswith('txt'):
-            self._from_txt(data, encoding)
+            self.from_txt(data, encoding)
         else: 
             raise ValueError('Pass either a List or a path to a csv or txt file.')
-        self._preprocess(preprocess, symbols)
-        self._tokenize()
-        self._create_vocab()
-        self._vectorize_sparse()
-        self._normalize_count_vector()
-        
-        
+        self.preprocess(preprocess, symbols)
+        self.n = len(self.data)
+        self.tokenize()
+        self.create_vocab()
+        self.count_vectorize()
+        self.document_freq()
+        self.inv_doc_freq()
+        self.calc_tf_idf()
+        return self.tf_idf
+
+
     
-    def _tokenize(self):
-        for sentence in self._data:
+    def tokenize(self):
+        for sentence in self.data:
             self.tokenized.append(sentence.split(' '))
+    
+    def create_vocab(self):
+        for sentence in self.tokenized:
+            for word in sentence:
+                if word not in self.vocab:
+                    self.vocab[word] = self.index
+                    self.index += 1
+    
+    def count_vectorize(self):
+        self.count_vector = np.zeros((self.n, len(self.vocab)))
+        for i, document in enumerate(self.tokenized):
+            for token in document:
+                self.count_vector[i][self.vocab[token]] += 1
+    
+    def document_freq(self):
+        self.df = np.count_nonzero(self.count_vector > 0, axis=0)
+    
+    def inv_doc_freq(self):
+        self.idf = np.log(self.n/self.df) + 1
+    
+    def calc_tf_idf(self, normalized=True):
+        self.tf_idf = np.copy(self.count_vector*self.idf)
+        if normalized:
+            self.unit_norm_l1()
+    
+    def unit_norm_l1(self):
+        for i, doc in enumerate(self.tf_idf):
+            tot = np.sum(doc)
+            for j, token in enumerate(doc):
+                self.tf_idf[i][j] = token/tot
+
+    def query(self, query):
+        pass
+
+    def cosine_matrix(self):
+        pass
+        
+     
         
 
-    def get_tokens(self):
-        return np.array(self._tokens)
 
-    def _from_cvs(self, data, column=None):
+    
+       
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    def from_cvs(self, data, column=None):
         if column is None:
             raise ValueError('Pass a column index as int')
         with open(data) as file:
             reader = csv.reader(file)
-            self._data = np.array([row[column] for row in reader])
+            self.data = np.array([row[column] for row in reader])
+  
 
-    def _from_txt(self, data, encoding):
+    def from_txt(self, data, encoding):
         with open(data, 'r', encoding=encoding) as file:
-            self._data = np.array([row for row in file.readlines()])
+            self.data = np.array([row for row in file.readlines()])
             
-    def _create_vocab(self):
-        for sentence in self.tokenized:
-            for word in sentence:
-                if word not in self.vocab:
-                    self.vocab[word] = self._index
-                    self._index += 1
 
-    def expand_vocab(self, data, encoding='utf-8', column=None):
-        pass
 
-    def _preprocess(self, options=[], symbols=[]):
+    def preprocess(self, options=[], symbols=[], query=None):
+        query_data = query
+        use_data = []
         if len(options) == 0:
             options = self.preprocess_opts
+        if query is not None:
+            if len(self.last_preproc_opts[0]) == 0:
+                raise ValueError('Cannot use stored options, please provide preprocessing options to match the vocab') 
+            else: 
+                options, symbols = self.last_preproc_opts
+                use_data = query
+        else:        
+            self.last_preproc_opts = (options, symbols)
+            use_data = self.data
+
         for opt in options:
-            for i, sentence in enumerate(self._data):
+            for i, sentence in enumerate(use_data):
+                if opt == 'whitespace':
+                    sentence = self.remove_whitespaces(sentence)
                 if opt == 'lower':
-                    sentence = self._to_lower(sentence)
+                    sentence = self.to_lower(sentence)
                 if opt == 'num2word':
-                    sentence = self._num_to_words(sentence)
+                    sentence = self.num_to_words(sentence)
                 if opt == 'stopwords':
-                    sentence = self._remove_stopwords(sentence)          
+                    sentence = self.remove_stopwords(sentence)          
                 if opt == 'punctuation':
-                    sentence = self._remove_punctuation(sentence)
+                    sentence = self.remove_punctuation(sentence)
                 if opt == 'lemmatization':
-                    sentence = self._lemmatize(sentence)
+                    sentence = self.lemmatize(sentence)
                 if opt == 'stem':
-                    sentence = self._stem(sentence)
+                    sentence = self.stem(sentence)
+                if opt == 'single_character':
+                    sentence = self.sngl_char(sentence)
                 if opt == 'symbol':
                     if len(symbols)== 0:
                         print('Preprocessing: removing custom symbols was requested, but no symbols were provided... skipping the step.')
                     else:
-                        sentence = self._custom_symbols(sentence)
-                self._data[i] = sentence
-        return self._data
+                        sentence = self.custom_symbols(sentence)
+                if query is not None:
+                    query_data[i] = sentence
+                else: 
+                    self.data[i] = sentence
+        if query is None:
+            return self.data
+        else: 
+            return query_data
 
+    def remove_whitespaces(self, sentence):
+        clean = []
+        for word in sentence.split(' '):
+            clean.append(word.strip())
+        return ' '.join(clean)
 
-    def _to_lower(self, sentence):
+    def to_lower(self, sentence):
         return sentence.lower()
     
-    def _remove_stopwords(self, sentence):
+    def remove_stopwords(self, sentence):
         return remove_stopwords(sentence)
     
-    def _remove_punctuation(self, sentence):
+    def remove_punctuation(self, sentence):
         return strip_punctuation(sentence)
     
 
-    def _lemmatize(self, sentence):
+    def lemmatize(self, sentence):
         clean = []
         lemmatizer = WordNetLemmatizer()
         for word in sentence.split(' '):
@@ -117,7 +206,7 @@ class Tokens():
             clean.append(word)
         return ' '.join(clean)
 
-    def _stem(self, sentence):
+    def stem(self, sentence):
         clean = []
         stemmer = PorterStemmer()
         for word in sentence.split(' '):
@@ -125,7 +214,7 @@ class Tokens():
             clean.append(word)
         return ' '.join(clean)
 
-    def _num_to_words(self, sentence):
+    def num_to_words(self, sentence):
         clean = []
         for word in sentence.split(' '):
             if is_number_regex(word):
@@ -133,38 +222,71 @@ class Tokens():
             clean.append(word)
         return ' '.join(clean)
 
+    def sngl_char(self, sentence):
+        no_sngl = []
+        for word in sentence.split(' '):
+            if len(word) > 1:
+                no_sngl.append(word)
+        return ' '.join(no_sngl)
 
-    def _custom_symbols(self, sentence, symbols):
+
+    def custom_symbols(self, sentence, symbols):
         for s in symbols:
             sentence = sentence.translate(str.maketrans('', '', s))
         return sentence
 
 
 
-    def _vectorize_sparse(self):
-        n = len(self._data)
-        self.count_vector = np.zeros((n, len(self.vocab)))
-        for i, sentence in enumerate(self.tokenized):
-            for word in sentence:
-                    self.count_vector[i][self.vocab[word]] += 1
-    
-    def _normalize_count_vector(self):
-        self.count_vector_normalized = copy.copy(self.count_vector)
-        for i, sentence in enumerate(self.count_vector_normalized):
-            length = len(self.tokenized[i])
-            for j, count in enumerate(sentence):
-                if count > 0:
-                    self.count_vector_normalized[i][j] = count/length
+  
+                
+                
 
                 
-            
-    
 
-p = os.getcwd()
-p = p.replace('src', '')
-p = os.path.join(p, 'data', 'Mini_Tweets', 'negative.csv')
-t = Tokens()
-t(p, column=5)
+        
+        
+                
+
+        
+        
+        
+
+
+    #below are compressed sparse row matrix variations - prefixed with csr
+            
+
+#p = os.getcwd()
+#p = p.replace('src', '')
+#p = os.path.join(p, 'data', 'Mini_Tweets', 'negative.csv')
+
+corpus = [
+'Data is the oil of the digital economy',
+'Data is a new oil'
+]
+
+w = Words()
+tf_idf = w(corpus, preprocess=['lower', 'punctuation', 'single_character'])
+print(list(w.vocab.keys()))
+print('\n\n')
+print(tf_idf)
+print('\n\n')
+
+v = TfidfVectorizer(norm='l1')
+fit = v.fit_transform(corpus)
+print(v.get_feature_names_out())
+print('\n\n')
+print(fit.toarray())
+
+
+
+
+
+
+
+
+
+
+
 
 
 
