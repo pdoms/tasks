@@ -14,6 +14,7 @@ class TestTasks(unittest.TestCase):
         c_2 = degree_to_radian(150)
         r_2 = 2.6179938780
         self.assertAlmostEqual(c_2, r_2, 3)
+
     def test_rad_to_deg(self):
         """radian to degree"""
         c_1 = int(radian_to_degree(0.7853981634))
@@ -22,10 +23,27 @@ class TestTasks(unittest.TestCase):
         c_2 = int(radian_to_degree(2.6179938780))
         r_2 = 150
         self.assertEqual(c_2, r_2)
+
     def test_area_trap(self):
         """area of trapezoid"""
         d_1 = area_trapezoid(5,6,5)
         self.assertAlmostEqual(d_1, 27.5, 1)
+    
+    def test_vec_sub(self):
+        """vector substraction"""
+        self.assertEqual(vec_sub(vec, vec_), [-1, -4, -2])
+
+    def test_maginitude(self):
+        """vector magntitude"""
+        self.assertAlmostEqual(magnitude(vec), 6.7082, 2)
+
+    def test_dot(self):
+        """dot product of two vectors"""
+        self.assertEqual(dot(vec, vec_), 62)
+    
+    def test_cross(self):
+        """cross product of two 3d vectors"""
+        self.assertEqual(cross(vec, vec_), [16, -12, 16])
 
 
 
@@ -46,7 +64,8 @@ class TestDistances(unittest.TestCase):
         r = cosine_distance(test, test_2)
         self.assertAlmostEqual(r, 0.487, places=2)
 
-
+vec = [5,4,-2]
+vec_ = [6,8,0]
 
 
 if __name__ == '__main__':

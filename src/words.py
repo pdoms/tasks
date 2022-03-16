@@ -15,7 +15,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer, Tf
 #finish query
 #csr 
 #support vector classifier
-#word embeddings
+
 
 def is_number_regex(s):
     if re.match("^\d+?\.\d+", s) is None:
@@ -25,6 +25,7 @@ def is_number_regex(s):
 
 class Words():
     def __init__(self):
+        self.raw = []
         self.data = []
         self.n = 0
         self.vocab = {}
@@ -37,9 +38,15 @@ class Words():
         self.preprocess_opts = ['whitespace', 'lower', 'num2word', 'lemmatization', 'stem', 'punctuation', 'stopwords', 'single_character', 'symbols']
         self.last_preproc_opts = ()
         self.is_query = False
+        self.query_data = []
+        self.query_tknzd = []
+        self.query_v = []
+        self.query_tfidf = []
+        self.query_mode = 'best_only'
+        self.results = []
 
 
-    def __call__(self, data, encoding='utf-8', column=None, preprocess=[], symbols=[]):
+    def __call__(self, data, encoding='utf-8', column=None, preprocess=[], symbols=[], keep_raw_in_mem=True):
         if isinstance(data, list):
             self.data = data
         elif data.endswith('csv'):
@@ -48,6 +55,9 @@ class Words():
             self.from_txt(data, encoding)
         else: 
             raise ValueError('Pass either a List or a path to a csv or txt file.')
+        if keep_raw_in_mem == True:
+            self.raw = copy.deepcopy(self.data)
+
         self.preprocess(preprocess, symbols)
         self.n = len(self.data)
         self.tokenize()
@@ -61,8 +71,11 @@ class Words():
 
     
     def tokenize(self):
-        for sentence in self.data:
-            self.tokenized.append(sentence.split(' '))
+        if self.is_query:
+            self.query_tknzd = self.query_data[0].split(' ')
+        else:
+            for sentence in self.data:
+                    self.tokenized.append(sentence.split(' '))
     
     def create_vocab(self):
         for sentence in self.tokenized:
@@ -94,12 +107,66 @@ class Words():
             for j, token in enumerate(doc):
                 self.tf_idf[i][j] = token/tot
 
-    def query(self, query):
-        pass
+    def query(self, query, get='best_only'):
+        """Paramenters: 
+            - "best_only" - returns highest score, incl. document
+            - as type int - returns best n scores, incl. documents
+            - None = - returns all scores, incl. documents
+        """
+        self.query_mode = get
+        self.is_query = True
+        if isinstance(query, str):
+            self.query_data = np.array([query])
+        elif isinstance(query, list):
+            if isinstance(query[0], list):
+                self.query_data = np.array([query])
+        self.preprocess()
+        self.tokenize()
+        self.query_v = np.zeros((len(self.vocab),))
+        for tkn in self.query_tknzd:
+            if tkn in self.vocab:
+                self.query_v[self.vocab[tkn]] += 1
+        self.query_v = self.query_v * self.idf
+        q_n = np.sum(self.query_v)
+        for i, c in enumerate(self.query_v):
+            self.query_v[i] = c/q_n
+        self.cosine_scores()
 
-    def cosine_matrix(self):
-        pass
+        return self.results
+
+
+    def cosine_scores(self):
+        #make sure that raw data is indexed the same way as self.data
+        #in case some doc gets lost in preprocessing
+        if self.query_mode == 'best_only':
+            max_score = 0 
+            idx = 0
+            for i, vec in enumerate(self.tf_idf):
+                score = cosine_distance(vec, self.query_v)
+                if score > max_score:
+                    max_score = score
+                    idx = i
+            if len(self.raw) > 0:
+                self.results = [max_score, self.raw[idx]]
+            else: 
+                self.results = [max_score, idx]
+        else: 
+            for i, vec in enumerate(self.tf_idf):
+                if len(self.raw) > 0:
+                    self.results.append((cosine_distance(vec, self.query_v), self.raw[i]))
+                else: 
+                    self.results.append((cosine_distance(vec, self.query_v)), i)
+            #check for mode int or None and sort properly!
+
         
+            
+    def cosine_matrix(self):
+        doc_n = len(self.tf_idf)
+        matrix = np.zeros((doc_n, doc_n))
+        for i, doc in enumerate(self.tf_idf):
+            for j, doc_ in enumerate(self.tf_idf):
+                matrix[i][j] = cosine_distance(doc, doc_)
+        return matrix
      
         
 
@@ -135,17 +202,16 @@ class Words():
             
 
 
-    def preprocess(self, options=[], symbols=[], query=None):
-        query_data = query
+    def preprocess(self, options=[], symbols=[]):
         use_data = []
         if len(options) == 0:
             options = self.preprocess_opts
-        if query is not None:
+        if self.is_query:
             if len(self.last_preproc_opts[0]) == 0:
                 raise ValueError('Cannot use stored options, please provide preprocessing options to match the vocab') 
             else: 
                 options, symbols = self.last_preproc_opts
-                use_data = query
+                use_data = self.query_data
         else:        
             self.last_preproc_opts = (options, symbols)
             use_data = self.data
@@ -173,14 +239,14 @@ class Words():
                         print('Preprocessing: removing custom symbols was requested, but no symbols were provided... skipping the step.')
                     else:
                         sentence = self.custom_symbols(sentence)
-                if query is not None:
-                    query_data[i] = sentence
+                if self.is_query:
+                    self.query_data[i] = sentence
                 else: 
                     self.data[i] = sentence
-        if query is None:
-            return self.data
+        if self.is_query:
+            return self.query_data
         else: 
-            return query_data
+            return self.data
 
     def remove_whitespaces(self, sentence):
         clean = []
@@ -235,14 +301,6 @@ class Words():
             sentence = sentence.translate(str.maketrans('', '', s))
         return sentence
 
-
-
-  
-                
-                
-
-                
-
         
         
                 
@@ -266,17 +324,7 @@ corpus = [
 
 w = Words()
 tf_idf = w(corpus, preprocess=['lower', 'punctuation', 'single_character'])
-print(list(w.vocab.keys()))
-print('\n\n')
-print(tf_idf)
-print('\n\n')
-
-v = TfidfVectorizer(norm='l1')
-fit = v.fit_transform(corpus)
-print(v.get_feature_names_out())
-print('\n\n')
-print(fit.toarray())
-
+print(w.query('oil is digital economy', get=None))
 
 
 
